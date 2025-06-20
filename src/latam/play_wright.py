@@ -19,16 +19,19 @@ def date_range(start: datetime, end: datetime):
         start += timedelta(days=1)
 
 
-def main():
-    # converte strings para datetime
-    start_dt = datetime.strptime(flight_date_start, "%Y-%m-%d")
-    end_dt = datetime.strptime(flight_date_end, "%Y-%m-%d")
+def extract_flights_data(flight_origin: str, flight_destination: str, flight_date_start: str, flight_date_end: str) -> list[dict]:
+    """Extract flight data from LATAM Airlines website for a given date range."""
     all_flights = []
 
+    # Convert date strings to datetime objects
+    start_dt = datetime.strptime(flight_date_start, "%Y-%m-%d")
+    end_dt = datetime.strptime(flight_date_end, "%Y-%m-%d")
+
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
-        page = browser.new_page()
-        # # bypass inicial de cookies e modais
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page(viewport={'width': 1920, 'height': 1080})
+        
+        # Initial cookie and modal bypass
         page.goto("https://latamairlines.com/br/pt")
         click_if_present(page, '#cookies-politics-button')
         click_if_present(page, '#button-close-login-incentive')
@@ -41,19 +44,26 @@ def main():
 
             try:
                 page.wait_for_selector('ol[aria-label="Voos disponíveis."]', timeout=30000)
+                print("page loaded")
             except:
                 print(f"Warning: Flights list not found for date {date_str}")
             
             current_flights = extract_flight_cards(page, date_str)
             print(f"Found {len(current_flights)} flights for {date_str}")
             all_flights.extend(current_flights)
-
         browser.close()
-
     return all_flights
 
 
+
 if __name__ == "__main__":
-    flights = main()
-    for f in flights:
-        print(f)
+    flights = extract_flights_data(
+        flight_origin,
+        flight_destination,
+        flight_date_start,
+        flight_date_end
+    )
+    
+    import pandas as pd
+    df = pd.DataFrame(flights)
+    df.to_csv('flights.csv', index=False)
