@@ -53,14 +53,15 @@ def create_latam_table(bq_client, dataset_id, table_id):
         
         # LATAM flight data schema (basic fields only)
         schema = [
+            bigquery.SchemaField("query_time", "DATETIME"),
             bigquery.SchemaField("depart_time", "DATETIME"),
-            bigquery.SchemaField("origin", "STRING"),
             bigquery.SchemaField("arrive_time", "DATETIME"),
+            bigquery.SchemaField("days_ahead", "INT64"),
+            bigquery.SchemaField("origin", "STRING"),
             bigquery.SchemaField("destination", "STRING"),
+            bigquery.SchemaField("operator", "STRING"),
             bigquery.SchemaField("duration", "FLOAT64"),
             bigquery.SchemaField("price", "FLOAT64"),
-            bigquery.SchemaField("operator", "STRING"),
-            bigquery.SchemaField("query_time", "DATETIME"),
         ]
         
         table = bigquery.Table(table_ref, schema=schema)

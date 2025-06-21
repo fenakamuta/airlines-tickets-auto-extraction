@@ -134,6 +134,7 @@ def extract_flight_cards(page, flight_date: str) -> List[Dict]:
                 "query_time":    datetime.now(),
                 "depart_time":   depart_dt,
                 "arrive_time":   arrive_dt,
+                "days_ahead":    (depart_dt - datetime.now()).days,
                 "origin":        origin,
                 "destination":   dest_iata,
                 "duration":      duration,
