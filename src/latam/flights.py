@@ -1,6 +1,5 @@
 from datetime import datetime, timedelta
 from playwright.sync_api import sync_playwright
-from config import flight_origin, flight_destination, flight_date_start, flight_date_end
 from .utils import build_latam_url, extract_flight_cards
 
 def click_if_present(page, selector, timeout=5000):
@@ -53,17 +52,3 @@ def extract_flights_data(flight_origin: str, flight_destination: str, flight_dat
             all_flights.extend(current_flights)
         browser.close()
     return all_flights
-
-
-
-if __name__ == "__main__":
-    flights = extract_flights_data(
-        flight_origin,
-        flight_destination,
-        flight_date_start,
-        flight_date_end
-    )
-    
-    import pandas as pd
-    df = pd.DataFrame(flights)
-    df.to_csv('flights.csv', index=False)

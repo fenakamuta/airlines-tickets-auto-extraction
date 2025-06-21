@@ -160,8 +160,8 @@ def create_unified_table(bq_client, dataset_id, table_id, schema_fields):
 def load_all_anac_data():
     """Load all ANAC data files to a single BigQuery table using wildcard loading."""
     # Configuration
-    dataset_id = os.getenv('BIGQUERY_DATASET_ID', 'anac_data')
-    table_id = os.getenv('BIGQUERY_TABLE_ID', 'anac_flights')
+    dataset_id = os.getenv('BIGQUERY_DATASET_ID', 'ticket_airlines')
+    table_id = os.getenv('BIGQUERY_ANAC_TABLE_ID', 'anac_flights')
     
     if GOOGLE_GCS_BUCKET_NAME == 'your-anac-data-bucket':
         logger.error("Set GOOGLE_GCS_BUCKET_NAME in config.py or environment")

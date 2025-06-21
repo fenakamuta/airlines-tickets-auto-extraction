@@ -131,13 +131,14 @@ def extract_flight_cards(page, flight_date: str) -> List[Dict]:
             duration = hours + mins / 60.0
 
             flights.append({
+                "query_time":    datetime.now(),
                 "depart_time":   depart_dt,
-                "origin":        origin,
                 "arrive_time":   arrive_dt,
+                "origin":        origin,
                 "destination":   dest_iata,
                 "duration":      duration,
                 "price":         price,
-                "operator":      operator
+                "operator":      operator,
             })
 
         except Exception:
