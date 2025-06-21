@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from playwright.sync_api import sync_playwright
 from config import flight_origin, flight_destination, flight_date_start, flight_date_end
-from utils import build_latam_url, extract_flight_cards
+from .utils import build_latam_url, extract_flight_cards
 
 def click_if_present(page, selector, timeout=5000):
     """Clica em um seletor, se estiver presente."""
@@ -28,8 +28,8 @@ def extract_flights_data(flight_origin: str, flight_destination: str, flight_dat
     end_dt = datetime.strptime(flight_date_end, "%Y-%m-%d")
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page(viewport={'width': 1920, 'height': 1080})
+        browser = p.chromium.launch(headless=False)
+        page = browser.new_page()
         
         # Initial cookie and modal bypass
         page.goto("https://latamairlines.com/br/pt")
