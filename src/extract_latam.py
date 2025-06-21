@@ -6,17 +6,21 @@ from latam.flights import extract_flights_data
 
 load_dotenv()
 
-flight_origin = environ.get("FLIGHT_ORIGIN", "GRU")
-flight_destination = environ.get("FLIGHT_DESTINATION", "GIG")
-flight_date_start = environ.get("FLIGHT_DATE_START", "2025-06-30")
-flight_date_end = environ.get("FLIGHT_DATE_END", "2025-07-07")
-
+origin = environ.get("LATAM_FLIGHT_ORIGIN_NAME", "São Paulo")
+destination = environ.get("LATAM_FLIGHT_DESTINATION_NAME", "Rio de Janeiro")
+origin_airport = environ.get("LATAM_FLIGHT_ORIGIN_AIRPORT", "GRU")
+destination_airport = environ.get("LATAM_FLIGHT_DESTINATION_AIRPORT", "GIG")
+flight_date_start = environ.get("LATAM_FLIGHT_DATE_START", "2025-06-30")
+flight_date_end = environ.get("LATAM_FLIGHT_DATE_END", "2025-07-07")
 GOOGLE_APPLICATION_CREDENTIALS = environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+
 
 if __name__ == "__main__":
     flights = extract_flights_data(
-        flight_origin,
-        flight_destination,
+        origin,
+        destination,
+        origin_airport,
+        destination_airport,
         flight_date_start,
         flight_date_end
     )
@@ -36,7 +40,7 @@ if __name__ == "__main__":
         
         # Create blob name with current date and origin/destination
         current_date = datetime.now().strftime("%Y-%m-%d")
-        blob_name = f"latam/{current_date}/{flight_origin}_to_{flight_destination}.csv"
+        blob_name = f"latam/{current_date}/{origin_airport}_to_{destination_airport}.csv"
         
         blob = bucket.blob(blob_name)
         blob.upload_from_string(df.to_csv(index=False))

@@ -18,8 +18,28 @@ def date_range(start: datetime, end: datetime):
         start += timedelta(days=1)
 
 
-def extract_flights_data(flight_origin: str, flight_destination: str, flight_date_start: str, flight_date_end: str) -> list[dict]:
-    """Extract flight data from LATAM Airlines website for a given date range."""
+def extract_flights_data(
+    origin: str, 
+    destination: str, 
+    origin_airport: str, 
+    destination_airport: str, 
+    flight_date_start: str, 
+    flight_date_end: str
+) -> list[dict]:
+    """
+    Extract flight data from LATAM Airlines website for a given date range.
+    
+    Args:
+        origin: Origin city name (e.g., 'São Paulo')
+        destination: Destination city name (e.g., 'Rio de Janeiro')
+        origin_airport: Origin airport code (e.g., 'GRU')
+        destination_airport: Destination airport code (e.g., 'GIG')
+        flight_date_start: Start date in 'YYYY-MM-DD' format
+        flight_date_end: End date in 'YYYY-MM-DD' format
+        
+    Returns:
+        List of flight dictionaries containing flight information
+    """
     all_flights = []
 
     # Convert date strings to datetime objects
@@ -38,17 +58,29 @@ def extract_flights_data(flight_origin: str, flight_destination: str, flight_dat
         for dt in date_range(start_dt, end_dt):
             date_str = dt.strftime("%Y-%m-%d")
             print(f"Processing date: {date_str}")
-            url = build_latam_url(flight_origin, flight_destination, date_str)
+            
+            url = build_latam_url(origin_airport, destination_airport, date_str)
             page.goto(url)
 
             try:
-                page.wait_for_selector('ol[aria-label="Voos disponíveis."]', timeout=30000)
-                print("page loaded")
-            except:
-                print(f"Warning: Flights list not found for date {date_str}")
+                page.wait_for_selector(
+                    'ol[aria-label="Voos disponíveis."]', 
+                    timeout=30000
+                )
+                print("Page loaded successfully")
+            except Exception as e:
+                print(f"Warning: Flights list not found for date {date_str}: {e}")
+                continue
             
-            current_flights = extract_flight_cards(page, date_str)
+            current_flights = extract_flight_cards(
+                page, 
+                date_str, 
+                origin, 
+                destination,
+            )
             print(f"Found {len(current_flights)} flights for {date_str}")
             all_flights.extend(current_flights)
+            
         browser.close()
+        
     return all_flights

@@ -51,20 +51,8 @@ def create_latam_table(bq_client, dataset_id, table_id):
         dataset_ref = bq_client.dataset(dataset_id)
         table_ref = dataset_ref.table(table_id)
         
-        # LATAM flight data schema (basic fields only)
-        schema = [
-            bigquery.SchemaField("query_time", "DATETIME"),
-            bigquery.SchemaField("depart_time", "DATETIME"),
-            bigquery.SchemaField("arrive_time", "DATETIME"),
-            bigquery.SchemaField("days_ahead", "INT64"),
-            bigquery.SchemaField("origin", "STRING"),
-            bigquery.SchemaField("destination", "STRING"),
-            bigquery.SchemaField("operator", "STRING"),
-            bigquery.SchemaField("duration", "FLOAT64"),
-            bigquery.SchemaField("price", "FLOAT64"),
-        ]
-        
-        table = bigquery.Table(table_ref, schema=schema)
+        # Create empty table - schema will be auto-detected during load
+        table = bigquery.Table(table_ref)
         table = bq_client.create_table(table, exists_ok=True)
         
         logger.info(f"Created/updated LATAM table: {dataset_id}.{table_id}")
@@ -76,8 +64,8 @@ def create_latam_table(bq_client, dataset_id, table_id):
 def load_latam_data():
     """Load all LATAM flight data files to BigQuery."""
     # Configuration
-    dataset_id = os.getenv('BIGQUERY_DATASET_ID', 'ticket_airlines')
-    table_id = os.getenv('BIGQUERY_LATAM_TABLE_ID', 'latam_flights')
+    dataset_id = os.getenv('GOOGLE_BIGQUERY_DATASET_ID', 'ticket_airlines')
+    table_id = os.getenv('GOOGLE_BIGQUERY_LATAM_TABLE_ID', 'latam_flights')
     
     if GOOGLE_GCS_BUCKET_NAME == 'your-anac-data-bucket':
         logger.error("Set GOOGLE_GCS_BUCKET_NAME in config.py or environment")
@@ -125,8 +113,8 @@ def load_latam_data():
             job_config = bigquery.LoadJobConfig(
                 source_format=bigquery.SourceFormat.CSV,
                 skip_leading_rows=1,  # Skip header
-                write_disposition=bigquery.WriteDisposition.WRITE_APPEND,  # Append to existing data
-                autodetect=False,  # Use our defined schema
+                write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,  # Replace existing data
+                autodetect=True,  # Let BigQuery detect the schema automatically
                 max_bad_records=1000,  # Allow more bad records
                 ignore_unknown_values=True,  # Ignore extra columns
                 allow_quoted_newlines=True,  # Handle quoted fields with newlines

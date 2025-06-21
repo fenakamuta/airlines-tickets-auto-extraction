@@ -1,6 +1,6 @@
 import re
 from uuid import uuid4
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 from urllib.parse import urlencode
 
@@ -45,19 +45,7 @@ def build_latam_url(
     return "https://www.latamairlines.com/br/pt/oferta-voos?" + urlencode(params)
 
 
-from typing import List, Dict
-from datetime import datetime
-import re
-
-from typing import List, Dict
-from datetime import datetime, timedelta
-import re
-
-from typing import List, Dict
-from datetime import datetime, timedelta
-import re
-
-def extract_flight_cards(page, flight_date: str) -> List[Dict]:
+def extract_flight_cards(page, flight_date: str, origin: str, destination: str) -> List[Dict]:
     """
     Extrai os cards de voo convertendo:
      - depart_time / arrive_time → datetime.datetime
@@ -76,7 +64,8 @@ def extract_flight_cards(page, flight_date: str) -> List[Dict]:
             dep_str = card.query_selector(
                 'div[data-testid$="-origin"] span[class*="TextHourFlight"]'
             ).inner_text().strip()     # ex: "20:15"
-            origin  = card.query_selector(
+
+            airport_origin  = card.query_selector(
                 'div[data-testid$="-origin"] span[class*="TextIATA"]'
             ).inner_text().strip()     # ex: "GRU"
 
@@ -100,7 +89,7 @@ def extract_flight_cards(page, flight_date: str) -> List[Dict]:
             m_days = re.search(r'\+(\d+)', arr_raw)
             days_diff = int(m_days.group(1)) if m_days else 0
 
-            dest_iata = card.query_selector(
+            airport_destination = card.query_selector(
                 'div[data-testid$="-destination"] span[class*="TextIATA"]'
             ).inner_text().strip()
 
@@ -130,13 +119,17 @@ def extract_flight_cards(page, flight_date: str) -> List[Dict]:
             mins  = int(m_match.group(1)) if m_match else 0
             duration = hours + mins / 60.0
 
+            # print(f"origin: {origin}, destination: {destination}, airport_origin: {airport_origin}, airport_destination: {airport_destination}")
+            
             flights.append({
                 "query_time":    datetime.now(),
                 "depart_time":   depart_dt,
                 "arrive_time":   arrive_dt,
                 "days_ahead":    (depart_dt - datetime.now()).days,
                 "origin":        origin,
-                "destination":   dest_iata,
+                "destination":   destination,
+                "airport_origin": airport_origin,
+                "airport_destination": airport_destination,
                 "duration":      duration,
                 "price":         price,
                 "operator":      operator,
