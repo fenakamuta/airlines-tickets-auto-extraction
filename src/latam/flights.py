@@ -23,29 +23,21 @@ def extract_flights_data(
     destination: str, 
     origin_airport: str, 
     destination_airport: str, 
-    flight_date_start: str, 
-    flight_date_end: str
+    flight_date: str
 ) -> list[dict]:
     """
-    Extract flight data from LATAM Airlines website for a given date range.
+    Extract flight data from LATAM Airlines website for a single date.
     
     Args:
         origin: Origin city name (e.g., 'São Paulo')
         destination: Destination city name (e.g., 'Rio de Janeiro')
         origin_airport: Origin airport code (e.g., 'GRU')
         destination_airport: Destination airport code (e.g., 'GIG')
-        flight_date_start: Start date in 'YYYY-MM-DD' format
-        flight_date_end: End date in 'YYYY-MM-DD' format
+        flight_date: Date in 'YYYY-MM-DD' format
         
     Returns:
         List of flight dictionaries containing flight information
     """
-    all_flights = []
-
-    # Convert date strings to datetime objects
-    start_dt = datetime.strptime(flight_date_start, "%Y-%m-%d")
-    end_dt = datetime.strptime(flight_date_end, "%Y-%m-%d")
-
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)
         page = browser.new_page()
@@ -55,32 +47,41 @@ def extract_flights_data(
         click_if_present(page, '#cookies-politics-button')
         click_if_present(page, '#button-close-login-incentive')
 
-        for dt in date_range(start_dt, end_dt):
-            date_str = dt.strftime("%Y-%m-%d")
-            print(f"Processing date: {date_str}")
-            
-            url = build_latam_url(origin_airport, destination_airport, date_str)
+        print(f"Processing date: {flight_date}")
+        
+        url = build_latam_url(origin_airport, destination_airport, flight_date)
+        
+        try:
             page.goto(url)
+        except Exception as e:
+            print(f"Failed to navigate to {url}: {e}")
+            browser.close()
+            return []
 
-            try:
-                page.wait_for_selector(
-                    'ol[aria-label="Voos disponíveis."]', 
-                    timeout=30000
-                )
-                print("Page loaded successfully")
-            except Exception as e:
-                print(f"Warning: Flights list not found for date {date_str}: {e}")
-                continue
-            
-            current_flights = extract_flight_cards(
+        try:
+            page.wait_for_selector(
+                'ol[aria-label="Voos disponíveis."]', 
+                timeout=15000
+            )
+            print("Page loaded successfully")
+        except Exception as e:
+            print(f"Warning: Flights list not found for date {flight_date}: {e}")
+            browser.close()
+            return []
+        
+        try:
+            flights = extract_flight_cards(
                 page, 
-                date_str, 
+                flight_date, 
                 origin, 
                 destination,
             )
-            print(f"Found {len(current_flights)} flights for {date_str}")
-            all_flights.extend(current_flights)
-            
+            print(f"Found {len(flights)} flights for {flight_date}")
+        except Exception as e:
+            print(f"Error extracting flights for {flight_date}: {e}")
+            browser.close()
+            return []
+        
         browser.close()
         
-    return all_flights
+    return flights

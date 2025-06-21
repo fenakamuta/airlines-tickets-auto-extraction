@@ -28,23 +28,6 @@ def init_clients():
         logger.error(f"Failed to initialize clients: {e}")
         return None, None
 
-def list_latam_files(storage_client, bucket_name):
-    """List all LATAM CSV files in GCS."""
-    try:
-        bucket = storage_client.bucket(bucket_name)
-        blobs = bucket.list_blobs(prefix='latam/')
-        
-        files = []
-        for blob in blobs:
-            if blob.name.endswith('.csv') and 'latam/' in blob.name:
-                files.append(blob.name)
-        
-        logger.info(f"Found {len(files)} LATAM CSV files")
-        return files
-    except Exception as e:
-        logger.error(f"Failed to list files: {e}")
-        return []
-
 def create_latam_table(bq_client, dataset_id, table_id):
     """Create BigQuery table for LATAM flight data."""
     try:
@@ -62,7 +45,7 @@ def create_latam_table(bq_client, dataset_id, table_id):
         return None
 
 def load_latam_data():
-    """Load all LATAM flight data files to BigQuery."""
+    """Load all LATAM flight data files to BigQuery using wildcard pattern."""
     # Configuration
     dataset_id = os.getenv('GOOGLE_BIGQUERY_DATASET_ID', 'ticket_airlines')
     table_id = os.getenv('GOOGLE_BIGQUERY_LATAM_TABLE_ID', 'latam_flights')
@@ -92,58 +75,41 @@ def load_latam_data():
     if not table:
         return
     
-    # List LATAM files
-    files = list_latam_files(storage_client, GOOGLE_GCS_BUCKET_NAME)
-    if not files:
-        logger.warning("No LATAM files found in GCS")
-        return
+    # Use wildcard pattern to load all LATAM CSV files at once
+    source_uri = f"gs://{GOOGLE_GCS_BUCKET_NAME}/latam/*.csv"
+    logger.info(f"Loading all LATAM files using pattern: {source_uri}")
     
-    # Load each file individually (LATAM files are smaller and have different structures)
-    successful_loads = 0
-    total_rows = 0
-    
-    for file_path in files:
-        logger.info(f"Processing: {file_path}")
+    try:
+        # Configure the load job for CSV
+        job_config = bigquery.LoadJobConfig(
+            source_format=bigquery.SourceFormat.CSV,
+            skip_leading_rows=1,  # Skip header
+            write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,  # Replace existing data
+            autodetect=True,  # Let BigQuery detect the schema automatically
+            max_bad_records=1000,  # Allow more bad records
+            ignore_unknown_values=True,  # Ignore extra columns
+            allow_quoted_newlines=True,  # Handle quoted fields with newlines
+            allow_jagged_rows=True,  # Allow rows with different column counts
+        )
         
-        try:
-            # GCS source URI for this file
-            source_uri = f"gs://{GOOGLE_GCS_BUCKET_NAME}/{file_path}"
-            
-            # Configure the load job for CSV
-            job_config = bigquery.LoadJobConfig(
-                source_format=bigquery.SourceFormat.CSV,
-                skip_leading_rows=1,  # Skip header
-                write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,  # Replace existing data
-                autodetect=True,  # Let BigQuery detect the schema automatically
-                max_bad_records=1000,  # Allow more bad records
-                ignore_unknown_values=True,  # Ignore extra columns
-                allow_quoted_newlines=True,  # Handle quoted fields with newlines
-                allow_jagged_rows=True,  # Allow rows with different column counts
-            )
-            
-            # Start the load job
-            load_job = bq_client.load_table_from_uri(
-                source_uri, table, job_config=job_config
-            )
-            
-            logger.info(f"Loading {file_path}...")
-            load_job.result()  # Wait for the job to complete
-            
-            logger.info(f"Loaded {load_job.output_rows} rows from {file_path}")
-            successful_loads += 1
-            total_rows += load_job.output_rows or 0
-            
-            if load_job.errors:
-                logger.warning(f"Job completed with {len(load_job.errors)} errors")
-                for error in load_job.errors[:3]:  # Show first 3 errors
-                    logger.warning(f"Error: {error}")
-                    
-        except Exception as e:
-            logger.error(f"Failed to load {file_path}: {e}")
-            continue
-    
-    logger.info(f"Successfully loaded {successful_loads}/{len(files)} files to {dataset_id}.{table_id}")
-    logger.info(f"Total rows loaded: {total_rows}")
+        # Start the load job
+        load_job = bq_client.load_table_from_uri(
+            source_uri, table, job_config=job_config
+        )
+        
+        logger.info("Loading all LATAM files...")
+        load_job.result()  # Wait for the job to complete
+        
+        logger.info(f"Successfully loaded {load_job.output_rows} total rows to {dataset_id}.{table_id}")
+        
+        if load_job.errors:
+            logger.warning(f"Job completed with {len(load_job.errors)} errors")
+            for error in load_job.errors[:3]:  # Show first 3 errors
+                logger.warning(f"Error: {error}")
+                
+    except Exception as e:
+        logger.error(f"Failed to load LATAM files: {e}")
+        return False
     
     return True
 

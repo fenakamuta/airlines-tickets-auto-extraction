@@ -28,144 +28,160 @@ def init_clients():
         logger.error(f"Failed to initialize clients: {e}")
         return None, None
 
-def detect_schema_from_sample(bq_client, storage_client, bucket_name):
-    """Detect schema from a sample file."""
+def list_anac_files(storage_client, bucket_name):
+    """List all ANAC text files in the bucket."""
     try:
         bucket = storage_client.bucket(bucket_name)
         blobs = list(bucket.list_blobs(prefix='anac_data/'))
         
-        if not blobs:
-            logger.error("No files found in anac_data/")
+        # Filter for .txt files
+        txt_files = [blob.name for blob in blobs if blob.name.endswith('.txt')]
+        
+        logger.info(f"Found {len(txt_files)} ANAC text files")
+        return txt_files
+        
+    except Exception as e:
+        logger.error(f"Failed to list ANAC files: {e}")
+        return []
+
+def detect_unified_schema(bq_client, storage_client, bucket_name):
+    """Detect unified schema from all ANAC files."""
+    try:
+        files = list_anac_files(storage_client, bucket_name)
+        if not files:
+            logger.error("No ANAC files found to detect schema")
             return None
         
-        # Get first .txt file
-        sample_file = None
-        for blob in blobs:
-            if blob.name.endswith('.txt'):
-                sample_file = blob
-                break
+        all_headers = set()
         
-        if not sample_file:
-            logger.error("No .txt files found")
-            return None
+        # Sample a few files to detect all possible headers
+        sample_files = files[:min(5, len(files))]  # Check first 5 files
         
-        # Download sample content
-        encodings = ['latin-1', 'iso-8859-1', 'utf-8', 'cp1252']
-        content = None
-        
-        for encoding in encodings:
-            try:
-                content = sample_file.download_as_text(encoding=encoding)
-                logger.info(f"Successfully decoded sample file with {encoding} encoding")
-                break
-            except UnicodeDecodeError:
+        for file_path in sample_files:
+            logger.info(f"Analyzing schema from: {file_path}")
+            
+            # Download file content
+            bucket = storage_client.bucket(bucket_name)
+            blob = bucket.blob(file_path)
+            
+            # Try different encodings
+            encodings = ['latin-1', 'iso-8859-1', 'utf-8', 'cp1252']
+            content = None
+            
+            for encoding in encodings:
+                try:
+                    content = blob.download_as_text(encoding=encoding)
+                    break
+                except UnicodeDecodeError:
+                    continue
+            
+            if not content:
+                logger.warning(f"Could not decode {file_path}")
                 continue
-        
-        if not content:
-            logger.error("Could not decode sample file")
-            return None
-        
-        # Detect delimiter and headers
-        lines = content.split('\n')
-        header_line = None
-        for line in lines:
-            if line.strip() and not line.startswith('#'):
-                header_line = line
-                break
-        
-        if not header_line:
-            logger.error("Could not find header in sample file")
-            return None
-        
-        # Detect delimiter
-        delimiters = [';', '|', '\t', ',']
-        best_delimiter = None
-        max_fields = 0
-        
-        for delimiter in delimiters:
-            if delimiter == ';':
-                # Handle quoted fields for semicolon
-                field_count = 0
+            
+            # Detect delimiter and headers
+            lines = content.split('\n')
+            header_line = None
+            for line in lines:
+                if line.strip() and not line.startswith('#'):
+                    header_line = line
+                    break
+            
+            if not header_line:
+                logger.warning(f"Could not find header in {file_path}")
+                continue
+            
+            # Detect delimiter
+            delimiters = [';', '|', '\t', ',']
+            best_delimiter = None
+            max_fields = 0
+            
+            for delimiter in delimiters:
+                if delimiter == ';':
+                    # Handle quoted fields for semicolon
+                    field_count = 0
+                    in_quotes = False
+                    for char in header_line:
+                        if char == '"':
+                            in_quotes = not in_quotes
+                        elif char == ';' and not in_quotes:
+                            field_count += 1
+                    field_count += 1
+                else:
+                    fields = header_line.split(delimiter)
+                    field_count = len(fields)
+                
+                if field_count > max_fields:
+                    max_fields = field_count
+                    best_delimiter = delimiter
+            
+            if not best_delimiter:
+                logger.warning(f"Could not detect delimiter for {file_path}")
+                continue
+            
+            # Extract headers
+            if best_delimiter == ';':
+                headers = []
+                current_field = ""
                 in_quotes = False
                 for char in header_line:
                     if char == '"':
                         in_quotes = not in_quotes
                     elif char == ';' and not in_quotes:
-                        field_count += 1
-                field_count += 1
+                        headers.append(current_field.strip())
+                        current_field = ""
+                    else:
+                        current_field += char
+                headers.append(current_field.strip())
             else:
-                fields = header_line.split(delimiter)
-                field_count = len(fields)
+                headers = [field.strip() for field in header_line.split(best_delimiter)]
             
-            if field_count > max_fields:
-                max_fields = field_count
-                best_delimiter = delimiter
+            # Clean and add headers
+            for header in headers:
+                if header.strip():
+                    # Clean header name for BigQuery
+                    clean_header = header.strip().replace(' ', '_').replace('-', '_').replace('.', '_')
+                    clean_header = ''.join(c for c in clean_header if c.isalnum() or c == '_')
+                    if clean_header and not clean_header[0].isdigit():
+                        all_headers.add(clean_header)
         
-        if not best_delimiter:
-            logger.error("Could not detect delimiter")
-            return None
+        # Convert to sorted list for consistent schema
+        unified_headers = sorted(list(all_headers))
+        logger.info(f"Detected {len(unified_headers)} unique columns across all files")
+        logger.info(f"Columns: {unified_headers}")
         
-        # Extract headers
-        if best_delimiter == ';':
-            headers = []
-            current_field = ""
-            in_quotes = False
-            for char in header_line:
-                if char == '"':
-                    in_quotes = not in_quotes
-                elif char == ';' and not in_quotes:
-                    headers.append(current_field.strip())
-                    current_field = ""
-                else:
-                    current_field += char
-            headers.append(current_field.strip())
-        else:
-            headers = [field.strip() for field in header_line.split(best_delimiter)]
-        
-        logger.info(f"Detected schema: {len(headers)} fields, delimiter: '{best_delimiter}'")
-        return headers, best_delimiter
+        return unified_headers
         
     except Exception as e:
-        logger.error(f"Failed to detect schema: {e}")
+        logger.error(f"Failed to detect unified schema: {e}")
         return None
 
-def create_unified_table(bq_client, dataset_id, table_id):
-    """Create unified BigQuery table with consistent schema."""
+def create_unified_table(bq_client, dataset_id, table_id, schema_fields):
+    """Create unified BigQuery table with detected schema."""
     try:
         dataset_ref = bq_client.dataset(dataset_id)
         table_ref = dataset_ref.table(table_id)
         
-        # Define consistent schema for ANAC data
+        # Create schema with metadata columns first, then all detected fields
         schema = [
             bigquery.SchemaField("source_file", "STRING"),
             bigquery.SchemaField("file_date", "STRING"),
-            # Add common ANAC fields in consistent order
-            bigquery.SchemaField("empresa_aerea", "STRING"),
-            bigquery.SchemaField("codigo_empresa", "STRING"),
-            bigquery.SchemaField("origem", "STRING"),
-            bigquery.SchemaField("destino", "STRING"),
-            bigquery.SchemaField("data_voo", "STRING"),
-            bigquery.SchemaField("hora_partida", "STRING"),
-            bigquery.SchemaField("hora_chegada", "STRING"),
-            bigquery.SchemaField("assentos_vendidos", "STRING"),
-            bigquery.SchemaField("assentos_ofertados", "STRING"),
-            bigquery.SchemaField("fator_ocupacao", "STRING"),
-            bigquery.SchemaField("receita_passageiros", "STRING"),
-            bigquery.SchemaField("receita_carga", "STRING"),
-            bigquery.SchemaField("receita_correio", "STRING"),
-            bigquery.SchemaField("receita_total", "STRING"),
         ]
+        
+        # Add all detected fields
+        for field_name in schema_fields:
+            schema.append(bigquery.SchemaField(field_name, "STRING"))
         
         table = bigquery.Table(table_ref, schema=schema)
         table = bq_client.create_table(table, exists_ok=True)
         
-        logger.info(f"Created/updated unified table: {dataset_id}.{table_id}")
+        logger.info(f"Created/updated unified table: {dataset_id}.{table_id} with {len(schema)} columns")
         return table
     except Exception as e:
         logger.error(f"Failed to create table: {e}")
         return None
 
-def load_file_to_bigquery(bq_client, storage_client, bucket_name, file_path, dataset_id, table_id):
+def load_file_to_bigquery(bq_client, storage_client, bucket_name, file_path, dataset_id, table_id, unified_schema):
     """Load a single ANAC file to BigQuery with proper column mapping."""
     try:
         # Download file content with proper encoding
@@ -245,25 +261,59 @@ def load_file_to_bigquery(bq_client, storage_client, bucket_name, file_path, dat
         else:
             headers = [field.strip() for field in header_line.split(best_delimiter)]
         
-        logger.info(f"Detected {len(headers)} columns in {file_path}")
+        # Clean headers to match unified schema
+        clean_headers = []
+        for header in headers:
+            clean_header = header.strip().replace(' ', '_').replace('-', '_').replace('.', '_')
+            clean_header = ''.join(c for c in clean_header if c.isalnum() or c == '_')
+            if clean_header and not clean_header[0].isdigit():
+                clean_headers.append(clean_header)
+            else:
+                clean_headers.append(f"field_{len(clean_headers)}")
+        
+        logger.info(f"Detected {len(clean_headers)} columns in {file_path}")
         
         # Extract filename and date
         filename = os.path.basename(file_path)
         file_date = filename.replace('.txt', '').replace('basica', '')
         
-        # Create enhanced content with consistent column order
-        enhanced_headers = ["source_file", "file_date"] + headers
+        # Create enhanced content with unified schema order
+        enhanced_headers = ["source_file", "file_date"] + unified_schema
         enhanced_lines = []
         
         for line in lines[1:]:  # Skip header
             if line.strip():
-                # Clean the line
-                cleaned_line = line.strip()
-                if '"' in cleaned_line:
-                    cleaned_line = cleaned_line.replace('"', "'")
+                # Parse the original line
+                if best_delimiter == ';':
+                    # Handle quoted fields
+                    fields = []
+                    current_field = ""
+                    in_quotes = False
+                    for char in line:
+                        if char == '"':
+                            in_quotes = not in_quotes
+                        elif char == ';' and not in_quotes:
+                            fields.append(current_field.strip())
+                            current_field = ""
+                        else:
+                            current_field += char
+                    fields.append(current_field.strip())
+                else:
+                    fields = [field.strip() for field in line.split(best_delimiter)]
                 
-                # Add metadata columns
-                enhanced_line = f"{filename}{best_delimiter}{file_date}{best_delimiter}{cleaned_line}"
+                # Create row with unified schema
+                row_data = [filename, file_date]  # Metadata columns
+                
+                # Map fields to unified schema
+                for schema_field in unified_schema:
+                    field_value = ""
+                    if schema_field in clean_headers:
+                        field_index = clean_headers.index(schema_field)
+                        if field_index < len(fields):
+                            field_value = fields[field_index].replace('"', "'")
+                    row_data.append(field_value)
+                
+                enhanced_line = best_delimiter.join(row_data)
                 enhanced_lines.append(enhanced_line)
         
         if not enhanced_lines:
@@ -315,11 +365,25 @@ def load_file_to_bigquery(bq_client, storage_client, bucket_name, file_path, dat
         logger.error(f"Failed to load {file_path}: {e}")
         return False
 
+def clear_existing_table(bq_client, dataset_id, table_id):
+    """Clear existing data from the table."""
+    try:
+        dataset_ref = bq_client.dataset(dataset_id)
+        table_ref = dataset_ref.table(table_id)
+        
+        # Delete table if it exists
+        bq_client.delete_table(table_ref, not_found_ok=True)
+        logger.info(f"Cleared existing table: {dataset_id}.{table_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to clear table: {e}")
+        return False
+
 def load_all_anac_data():
     """Load all ANAC data files to a single BigQuery table."""
     # Configuration
-    dataset_id = os.getenv('BIGQUERY_DATASET_ID', 'anac_data')
-    table_id = os.getenv('BIGQUERY_TABLE_ID', 'anac_flights')
+    dataset_id = os.getenv('GOOGLE_BIGQUERY_DATASET_ID', 'ticket_airlines')
+    table_id = os.getenv('GOOGLE_BIGQUERY_ANAC_TABLE_ID', 'anac_flights')
     
     if GOOGLE_GCS_BUCKET_NAME == 'your-anac-data-bucket':
         logger.error("Set GOOGLE_GCS_BUCKET_NAME in config.py or environment")
@@ -341,8 +405,17 @@ def load_all_anac_data():
         logger.error(f"Failed to create dataset: {e}")
         return
     
-    # Create unified table with consistent schema
-    table = create_unified_table(bq_client, dataset_id, table_id)
+    # Detect unified schema from all files
+    unified_schema = detect_unified_schema(bq_client, storage_client, GOOGLE_GCS_BUCKET_NAME)
+    if not unified_schema:
+        logger.error("Could not detect unified schema")
+        return
+    
+    # Clear existing table to start fresh
+    clear_existing_table(bq_client, dataset_id, table_id)
+    
+    # Create unified table with detected schema
+    table = create_unified_table(bq_client, dataset_id, table_id, unified_schema)
     if not table:
         return
     
@@ -354,11 +427,10 @@ def load_all_anac_data():
     
     # Load each file individually to ensure proper column mapping
     successful_loads = 0
-    total_rows = 0
     
     for file_path in files:
         logger.info(f"Processing: {file_path}")
-        if load_file_to_bigquery(bq_client, storage_client, GOOGLE_GCS_BUCKET_NAME, file_path, dataset_id, table_id):
+        if load_file_to_bigquery(bq_client, storage_client, GOOGLE_GCS_BUCKET_NAME, file_path, dataset_id, table_id, unified_schema):
             successful_loads += 1
     
     logger.info(f"Successfully loaded {successful_loads}/{len(files)} files to {dataset_id}.{table_id}")
